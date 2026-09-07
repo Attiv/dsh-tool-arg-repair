@@ -1,0 +1,3 @@
+- insert:
+    - id: tool-arg-repair
+      name: dsh-tool-arg-repair
