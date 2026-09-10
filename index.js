@@ -14,10 +14,19 @@ function repairSearchDefinition(original) {
     || schema.properties.queries.items?.type !== 'string'
     || Object.hasOwn(schema.properties, 'query') || Object.hasOwn(schema.properties, 'q')) return original
 
+  const parameters = structuredClone(schema)
+  parameters.properties.query = {
+    ...parameters.properties.queries.items,
+    description: 'Required search query string. Use one search query per call.',
+  }
+  delete parameters.properties.queries
+  parameters.required = parameters.required.map(key => key === 'queries' ? 'query' : key)
   const repaired = {
     ...original,
-    // DSH dispatches directly to execute; defineTool validates inside the
-    // original execute. Keep canonical queries required in the advertised schema.
+    description: 'Search the web for current information. Provide the required query string. Make separate calls for multiple queries. Returns an optional summary answer and a list of source URLs.',
+    parameters,
+    // Some gateways emit {} for web_search + queries[], but preserve query.
+    // Only the model-facing schema changes; execution uses original validation.
     async execute(args, exec) {
       const normalized = withWebSearchQueries(args)
       const violations = validateJsonSchemaValue(schema, normalized, '')
@@ -70,7 +79,16 @@ export function apply(ctx) {
         const original = agent.ctx.tools.get(toolName, agent)
         if (original === undefined) continue
         const repaired = repairDefinition(toolName, original)
-        if (repaired !== original) disposers.push(agent.ctx.tools.register(repaired))
+        if (repaired !== original) {
+          disposers.push(agent.ctx.tools.register(repaired))
+          if (toolName === 'web_search' && agent.ctx.systemPrompt !== undefined) {
+            disposers.push(agent.ctx.systemPrompt.section({
+              name: 'tool-arg-repair:web-search-query',
+              order: agent.ctx.systemPrompt.getSectionOrder('TOOL_WEB_SEARCH') + 1,
+              text: 'web_search compatibility signature: supply the required query string, for example {"query":"search terms"}. This replaces any queries-array calling guidance for web_search. For multiple queries, make separate calls. Never call it with an empty object.',
+            }))
+          }
+        }
       }
     }
     install()

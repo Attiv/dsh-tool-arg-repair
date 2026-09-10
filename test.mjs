@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { DEFAULT_DESCRIPTION, withDefaultDescription } from './repair.js'
 import { apply } from './index.js'
-import { defineTool, validateJsonSchemaValue, ToolArgsError } from '@deepseek-ai/dsh-tools'
+import { defineTool, validateJsonSchemaValue, assertObjectJsonSchema, ToolArgsError } from '@deepseek-ai/dsh-tools'
 
 test('repairs only an omitted description', () => {
   assert.deepEqual(withDefaultDescription('bash', { command: 'pwd' }), {
@@ -58,10 +58,20 @@ function searchTool({ maxQueries = 4, additionalProperties, items = { type: 'str
 function installTools(originals, { emitOnRegister = false } = {}) {
   const globals = new Map(originals.map(tool => [tool.name, tool]))
   const local = new Map()
+  const prompts = new Map()
   const listeners = new Set()
   let cleanup
   const change = () => { for (const listener of [...listeners]) listener() }
   const agent = { ctx: {
+    systemPrompt: {
+      getSectionOrder: () => 500,
+      section(section) {
+        assert.equal(Number.isFinite(section.order), true)
+        assert.equal(prompts.has(section.name), false)
+        prompts.set(section.name, section)
+        return () => prompts.delete(section.name)
+      },
+    },
     tools: {
       get: name => local.get(name) ?? globals.get(name),
       register(tool) {
@@ -86,7 +96,7 @@ function installTools(originals, { emitOnRegister = false } = {}) {
     assert.equal(event, 'agent/created')
     listener({ agent })
   } })
-  return { get: name => agent.ctx.tools.get(name), globals, local, change, dispose: () => cleanup() }
+  return { get: name => agent.ctx.tools.get(name), globals, local, prompts, change, dispose: () => cleanup() }
 }
 
 test('reproduces the upstream missing queries error before repair', async () => {
@@ -111,13 +121,58 @@ for (const key of ['query', 'q']) {
       assert.equal(calls[0].exec, exec)
       assert.equal(exec.arguments, args)
       assert.deepEqual(tool.parameters, originalSchema)
-      assert.deepEqual(repaired.parameters, originalSchema, 'canonical schema must stay required')
+      assert.deepEqual(repaired.parameters.required, ['query'])
       assert.deepEqual(validateJsonSchemaValue(originalSchema, calls[0].args), [])
       assert.equal(repaired.timeoutMs, tool.timeoutMs)
       registry.dispose()
     })
   }
 }
+
+test('advertises a required scalar query instead of the incompatible queries array', async () => {
+  const { tool, calls } = searchTool()
+  const originalSchema = structuredClone(tool.parameters)
+  const repaired = installTools([tool]).get('web_search')
+  assert.equal(repaired.name, 'web_search')
+  assert.equal(repaired.parameters.properties.query.type, 'string')
+  assert.equal(Object.hasOwn(repaired.parameters.properties, 'queries'), false)
+  assert.deepEqual(repaired.parameters.required, ['query'])
+  assert.doesNotThrow(() => assertObjectJsonSchema(repaired.parameters))
+  assert.deepEqual(validateJsonSchemaValue(repaired.parameters, { query: 'DeepSeek' }), [])
+  assert.notDeepEqual(validateJsonSchemaValue(repaired.parameters, {}), [])
+  assert.notDeepEqual(validateJsonSchemaValue(repaired.parameters, { query: ['DeepSeek'] }), [])
+  assert.match(repaired.description, /query.*string/i)
+  assert.doesNotMatch(repaired.description, /required queries array/)
+  await repaired.execute({ query: 'DeepSeek' }, {})
+  assert.deepEqual(calls[0].args, { queries: ['DeepSeek'] })
+  assert.deepEqual(tool.parameters, originalSchema)
+})
+
+test('keeps extra schema fields, required keys, and item constraints in scalar mode', () => {
+  const { tool } = searchTool({ additionalProperties: false, items: { type: 'string', enum: ['allowed'] } })
+  tool.parameters.properties.region = { type: 'string' }
+  tool.parameters.required.push('region')
+  const repaired = installTools([tool]).get('web_search')
+  assert.deepEqual(repaired.parameters.required, ['query', 'region'])
+  assert.equal(repaired.parameters.additionalProperties, false)
+  assert.deepEqual(repaired.parameters.properties.region, { type: 'string' })
+  assert.deepEqual(repaired.parameters.properties.query.enum, ['allowed'])
+  assert.deepEqual(validateJsonSchemaValue(repaired.parameters, { query: 'allowed', region: 'cn' }), [])
+  assert.notDeepEqual(validateJsonSchemaValue(repaired.parameters, { query: 'other', region: 'cn' }), [])
+})
+
+test('adds scalar-query guidance and cleans it up with the tool', () => {
+  const { tool } = searchTool()
+  const registry = installTools([tool], { emitOnRegister: true })
+  assert.equal(registry.prompts.size, 1)
+  assert.match([...registry.prompts.values()][0].text, /query.*string/i)
+  registry.change()
+  assert.equal(registry.prompts.size, 1)
+  registry.globals.delete('web_search')
+  registry.change()
+  assert.equal(registry.prompts.size, 0)
+  registry.dispose()
+})
 
 test('preserves explicit queries without overriding them from aliases', async () => {
   const { tool, calls } = searchTool()

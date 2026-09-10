@@ -1,10 +1,10 @@
 # dsh-tool-arg-repair
 
-DeepSeek Harness 兼容性插件：修复部分模型调用 `bash` / `pwsh` 时遗漏 UI 注释字段 `description`，以及调用 `web_search` 时将 `queries` 误写为 `query` / `q` 导致的 `INVALID_ARGS`。
+DeepSeek Harness 兼容性插件：修复部分模型调用 `bash` / `pwsh` 时遗漏 `description`，以及部分接口不兼容 `web_search` 的 `queries` 数组签名导致的空参数问题。
 
 ## web_search 参数兼容
 
-缺少 `queries` 且只提供 `query` 或 `q` 之一时，将字符串包装为单元素数组，或将字符串数组改名：
+**0.1.1 起，模型可见的参数改为必填 `query` 字符串。** 工具名仍为 `web_search`，多个搜索词分次调用。插件将单条查询转为原工具的数组格式：
 
 ```json
 { "query": "DeepSeek Harness" }
@@ -16,9 +16,9 @@ DeepSeek Harness 兼容性插件：修复部分模型调用 `bash` / `pwsh` 时�
 { "queries": ["DeepSeek Harness"] }
 ```
 
-同样支持 `{ "q": "DeepSeek Harness" }` 和 `{ "query": ["DeepSeek", "Harness"] }`。
+执行层仍兼容旧的 `queries` 数组，以及 `{ "q": "DeepSeek Harness" }`、`{ "query": ["DeepSeek", "Harness"] }`；模型新生成的调用应优先使用上面的单条 `query`。
 
-- 保留原工具 schema 中的 `queries` 必填要求；在原执行函数校验参数之前转换别名，不修改原始参数或历史日志。
+- 仅修改对模型公开的 schema 和调用提示；原工具 schema 中的 `queries` 必填要求继续用于内部校验，不修改原始参数或历史日志。
 - 仅支持原工具声明 `queries` 为字符串数组、且未定义 `query` / `q` 字段的情况；其他 schema 不作猜测转换。
 - 显式 `queries` 不覆盖、不纠正；没有查询内容、类型错误，或缺少 `queries` 且同时提供两个别名时仍然报错。
 - 原工具继续检查空白查询、空数组及查询数量上限（通常为 1–4 条，取决于 DSH 配置）；不补默认搜索词、不截断查询。
@@ -33,12 +33,19 @@ DeepSeek Harness 兼容性插件：修复部分模型调用 `bash` / `pwsh` 时�
 
 ## 安装
 
-将本目录作为 profile bundle 加入 `package.json`：
+先在实际插件目录安装依赖（尤其是 profile 配置了 `autoInstallPeers: false` 时）：
+
+```sh
+cd ~/.dsh/plugins/dsh-tool-arg-repair
+npm install --ignore-scripts
+```
+
+然后将该目录作为 profile bundle 加入 profile 的 `package.json`。以下示例适用于插件放在 `~/.dsh/plugins/dsh-tool-arg-repair`、profile 位于 `~/.dsh/profiles/web` 的布局：
 
 ```json
 {
   "dependencies": {
-    "dsh-tool-arg-repair": "file:G:/develop/dsh-tool-arg-repair"
+    "dsh-tool-arg-repair": "link:../../plugins/dsh-tool-arg-repair"
   },
   "dsh": {
     "profile": {
@@ -48,7 +55,25 @@ DeepSeek Harness 兼容性插件：修复部分模型调用 `bash` / `pwsh` 时�
 }
 ```
 
-然后重启 DSH。更新插件后也需要重启；如果 profile 使用的是复制安装而非目录链接，请先在 profile 中重新安装更新后的插件。插件不改写历史日志，修复仅影响后续调用。
+在 profile 目录执行 `pnpm install`，然后完全退出并重新启动 DSH。其他目录布局请调整相对路径；Windows 也可使用指向实际插件目录的 `link:` 路径。
+
+### 更新与确认生效
+
+```sh
+cd ~/.dsh/plugins/dsh-tool-arg-repair
+git pull --ff-only
+npm install --ignore-scripts
+git log -1 --oneline
+node -p "require('./package.json').version"
+```
+
+然后完全退出并重新打开 DSH；macOS 桌面壳应使用 `⌘Q`，仅关闭窗口不会重启后台。确认实际 profile 的 `node_modules/dsh-tool-arg-repair` 指向刚更新的目录，而不是旧的 `file:` 安装副本。
+
+0.1.1 生效后，新请求的工具参数应为 `query: string`、`required: ["query"]`。历史日志中的旧 schema 和错误不会被改写。
+
+### 为什么只更新旧版还可能报错？
+
+对同一接口进行最小对照测试时，`web_search` + `queries` 数组收到原始参数 `{}`，而 `web_search` + `query` 字符串能够收到正确查询。0.1.0 仅做执行前别名转换，无法恢复原始空参数；0.1.1 同时调整模型可见的签名。如果新签名下接口仍返回 `{}`，需要继续检查接口响应，插件不会编造搜索词来掩盖问题。
 
 ## 测试
 

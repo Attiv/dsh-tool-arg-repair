@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-arg-repair",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Repair omitted tool descriptions and web_search query aliases in DeepSeek Harness while preserving original validation.",
   "type": "module",
   "main": "index.js",
