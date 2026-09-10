@@ -69,7 +69,7 @@ node -p "require('./package.json').version"
 
 然后完全退出并重新打开 DSH；macOS 桌面壳应使用 `⌘Q`，仅关闭窗口不会重启后台。确认实际 profile 的 `node_modules/dsh-tool-arg-repair` 指向刚更新的目录，而不是旧的 `file:` 安装副本。
 
-0.1.1 生效后，新请求的工具参数应为 `query: string`、`required: ["query"]`。历史日志中的旧 schema 和错误不会被改写。
+请更新到 **0.1.2**：它还修复了 Cordis effect 清理函数误在注册阶段执行、导致修复工具立即卸载的问题。新请求的工具参数应为 `query: string`、`required: ["query"]`。历史日志中的旧 schema 和错误不会被改写。
 
 ### 为什么只更新旧版还可能报错？
 
@@ -82,4 +82,4 @@ npm install
 npm test
 ```
 
-测试使用真实的 `@deepseek-ai/dsh-tools` 校验器和 `defineTool`，模拟 agent scope 的注册与生命周期，不发起真实网络搜索。
+测试使用真实的 `@deepseek-ai/dsh-tools` 校验器和 `defineTool`，同时覆盖模拟注册边界与真实 Cordis 单/多 agent scope 生命周期，不发起真实网络搜索。

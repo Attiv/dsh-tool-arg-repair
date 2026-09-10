@@ -103,7 +103,7 @@ export function apply(ctx) {
         refreshing = false
       }
     })
-    agent.ctx.effect(() => {
+    agent.ctx.effect(() => () => {
       stop()
       while (disposers.length > 0) disposers.pop()()
     }, 'tool-arg-repair: cleanup')

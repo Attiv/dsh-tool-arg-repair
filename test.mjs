@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import { DEFAULT_DESCRIPTION, withDefaultDescription } from './repair.js'
 import { apply } from './index.js'
 import { defineTool, validateJsonSchemaValue, assertObjectJsonSchema, ToolArgsError } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { Context } from '@deepseek-ai/cordis'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import { createScope } from '@deepseek-ai/dsh-scope'
 
 test('repairs only an omitted description', () => {
   assert.deepEqual(withDefaultDescription('bash', { command: 'pwd' }), {
@@ -90,7 +94,7 @@ function installTools(originals, { emitOnRegister = false } = {}) {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    effect(fn) { cleanup = fn },
+    effect(fn) { cleanup = fn() },
   } }
   apply({ on(event, listener) {
     assert.equal(event, 'agent/created')
@@ -105,6 +109,64 @@ test('reproduces the upstream missing queries error before repair', async () => 
     message: 'invalid arguments: missing required property "queries"',
     code: 'INVALID_ARGS',
   })
+})
+
+test('real Cordis scope keeps the repair installed until scope disposal', async () => {
+  const ctx = new Context()
+  new SystemPrompt(ctx, {})
+  new ToolRuntime(ctx, {})
+  const { tool, calls } = searchTool()
+  ctx.tools.register(tool)
+  apply(ctx)
+  const agent = {}
+  const scope = createScope(ctx, agent)
+  agent.ctx = scope.ctx
+  try {
+    ctx.emit('agent/created', { agent })
+    const installed = agent.ctx.tools.get('web_search', agent)
+    assert.notEqual(installed, tool, 'repair must not unregister during effect setup')
+    assert.deepEqual(installed.parameters.required, ['query'])
+    await installed.execute({ query: 'real scope' }, {})
+    assert.deepEqual(calls[0].args, { queries: ['real scope'] })
+    assert.equal(ctx.tools.get('web_search'), tool)
+    await scope.dispose()
+    assert.equal(ctx.tools.get('web_search', agent), tool)
+  } finally {
+    await scope.dispose()
+    await ctx.fiber.dispose()
+  }
+})
+
+test('real Cordis scopes survive cross-agent registry changes and independent cleanup', async () => {
+  const ctx = new Context()
+  new SystemPrompt(ctx, {})
+  new ToolRuntime(ctx, {})
+  const { tool } = searchTool()
+  ctx.tools.register(tool)
+  apply(ctx)
+  const scopes = []
+  const agents = []
+  try {
+    for (let i = 0; i < 2; i++) {
+      const agent = {}
+      const scope = createScope(ctx, agent)
+      scopes.push(scope)
+      agents.push(agent)
+      agent.ctx = scope.ctx
+      ctx.emit('agent/created', { agent })
+    }
+    const removeOther = ctx.tools.register({ ...tool, name: 'other_tool' })
+    for (const agent of agents) {
+      assert.deepEqual(agent.ctx.tools.get('web_search', agent).parameters.required, ['query'])
+    }
+    removeOther()
+    await scopes[0].dispose()
+    assert.equal(ctx.tools.get('web_search', agents[0]), tool)
+    assert.deepEqual(agents[1].ctx.tools.get('web_search', agents[1]).parameters.required, ['query'])
+  } finally {
+    for (const scope of scopes) await scope.dispose()
+    await ctx.fiber.dispose()
+  }
 })
 
 for (const key of ['query', 'q']) {

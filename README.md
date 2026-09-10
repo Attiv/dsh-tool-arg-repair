@@ -36,7 +36,9 @@ DeepSeek Harness（DSH）工具参数兼容插件，修复部分模型遗漏或�
 3. 推荐 profile 使用 `link:` 指向该目录，避免 `file:` 复制安装继续命中旧副本；详见完整文档。
 4. 完全退出并重新打开 DSH，再发起新的工具调用。macOS 桌面壳请用 `⌘Q`，只关闭窗口不会停止后台；历史日志不会被改写。
 
-新版生效后，工具参数面板应显示 `query: string` 且 `required: ["query"]`，不再是 `queries` 数组。可用实际安装路径的 `package.json` 确认版本为 `0.1.1`。
+新版生效后，工具参数面板应显示 `query: string` 且 `required: ["query"]`，不再是 `queries` 数组。可用实际安装路径的 `package.json` 确认版本为 **`0.1.2`**。
+
+0.1.2 还修复了 Cordis effect 清理函数的注册方式，避免修复工具在注册后立即被卸载，并加入真实 Cordis 单/多 agent 生命周期回归测试。
 
 ## 验证
 

@@ -1,6 +1,6 @@
 {
   "name": "dsh-tool-arg-repair",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Repair omitted tool descriptions and web_search query aliases in DeepSeek Harness while preserving original validation.",
   "type": "module",
   "main": "index.js",
@@ -12,5 +12,10 @@
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "^0.1.2-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-scope": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1"
   }
 }
