@@ -1,11 +1,12 @@
 {
   "name": "dsh-tool-arg-repair",
   "version": "0.1.0",
-  "description": "Repair omitted UI-only tool arguments in DeepSeek Harness without weakening command/code validation.",
+  "description": "Repair omitted tool descriptions and web_search query aliases in DeepSeek Harness while preserving original validation.",
   "type": "module",
   "main": "index.js",
   "exports": { ".": "./index.js" },
   "files": ["index.js", "repair.js", "cordis.patch.yml", "README.zh.md"],
+  "scripts": { "test": "node --test test.mjs" },
   "license": "MIT",
   "keywords": ["deepseek-harness", "dsh-plugin", "tool-call", "compatibility"],
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
