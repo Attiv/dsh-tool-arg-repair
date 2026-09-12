@@ -28,9 +28,9 @@ export function withDefaultDescription(toolName, args) {
  * Peel model-authored argument envelopes (`{ arguments: … }`, `{ expected: … }`,
  * possibly nested) off a call.
  *
- * Fail-closed by construction: the original arguments must FAIL `fails` while a
- * peeled candidate must satisfy `accepts`. That gate is what keeps the repair
- * from rewriting a call the tool legitimately accepts (for example a tool that
+ * Fail-closed by construction: the call as sent must FAIL `accepts` while a
+ * peeled candidate must satisfy it. That gate is what keeps the repair from
+ * rewriting a call the tool legitimately accepts (for example a tool that
  * really does declare `arguments`), and it never invents a call out of
  * arguments the tool would still reject — it only removes a wrapper the model
  * added around arguments the repaired tool will accept.
