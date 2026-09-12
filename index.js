@@ -1,10 +1,17 @@
 import { ToolArgsError, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
-import { withDefaultDescription, withWebSearchQueries } from './repair.js'
+import { withDefaultDescription, withWebSearchQueries, unwrapArgEnvelope } from './repair.js'
 
 export const name = 'tool-arg-repair'
 export const inject = ['tools']
 
-const REPAIRABLE = ['bash', 'pwsh', 'web_search']
+/** The reserved PTC transport cannot be shadowed (the registry rejects it). */
+const RESERVED_TOOL = 'run_code'
+
+/** Tools whose model-facing schema also drops the required `description`. */
+const DESCRIPTION_REPAIR = new Set(['bash', 'pwsh'])
+
+/** Always covered, even when the registry cannot enumerate its tools. */
+const KNOWN_TOOLS = ['bash', 'pwsh', 'web_search']
 
 function repairSearchDefinition(original) {
   const schema = original.parameters
@@ -21,6 +28,10 @@ function repairSearchDefinition(original) {
   }
   delete parameters.properties.queries
   parameters.required = parameters.required.map(key => key === 'queries' ? 'query' : key)
+  // Envelope first (the wrapper sits outside the aliases), then alias conversion.
+  const settle = args => withWebSearchQueries(args)
+  const accepts = args => validateJsonSchemaValue(schema, settle(args), '').length === 0
+  const normalize = args => settle(unwrapArgEnvelope(args, accepts))
   const repaired = {
     ...original,
     description: 'Search the web for current information. Provide the required query string. Make separate calls for multiple queries. Returns an optional summary answer and a list of source URLs.',
@@ -28,7 +39,7 @@ function repairSearchDefinition(original) {
     // Some gateways emit {} for web_search + queries[], but preserve query.
     // Only the model-facing schema changes; execution uses original validation.
     async execute(args, exec) {
-      const normalized = withWebSearchQueries(args)
+      const normalized = normalize(args)
       const violations = validateJsonSchemaValue(schema, normalized, '')
       if (violations.length > 0) throw new ToolArgsError(violations)
       return original.execute(normalized, exec)
@@ -42,7 +53,7 @@ function repairSearchDefinition(original) {
   ]) {
     for (const method of methods) {
       if (typeof source?.[method] !== 'function') continue
-      target[method] = (args, ...rest) => source[method](withWebSearchQueries(args), ...rest)
+      target[method] = (args, ...rest) => source[method](normalize(args), ...rest)
     }
   }
   return repaired
@@ -50,32 +61,62 @@ function repairSearchDefinition(original) {
 
 function repairDefinition(toolName, original) {
   if (toolName === 'web_search') return repairSearchDefinition(original)
-  const parameters = structuredClone(original.parameters)
-  const required = Array.isArray(parameters.required)
-    ? parameters.required.filter((key) => key !== 'description')
-    : undefined
-  if (required === undefined || required.length === 0) delete parameters.required
-  else parameters.required = required
+  const schema = original.parameters
+  // Envelope repair needs an object argument schema; nothing else is touched.
+  if (schema?.type !== 'object') return original
+  const accepts = args => validateJsonSchemaValue(schema, withDefaultDescription(toolName, args), '').length === 0
+  const normalize = args => withDefaultDescription(toolName, unwrapArgEnvelope(args, accepts))
+  let parameters = original.parameters
+  if (DESCRIPTION_REPAIR.has(toolName)) {
+    parameters = structuredClone(original.parameters)
+    const required = Array.isArray(parameters.required)
+      ? parameters.required.filter((key) => key !== 'description')
+      : undefined
+    if (required === undefined || required.length === 0) delete parameters.required
+    else parameters.required = required
+  }
   const repaired = {
     ...original,
     parameters,
     async execute(args, exec) {
-      return original.execute(withDefaultDescription(toolName, args), exec)
+      return original.execute(normalize(args), exec)
     },
+  }
+  for (const [target, source, methods] of [
+    [repaired, original, ['presentCall', 'presentResult', 'isConcurrencySafe']],
+    [repaired.output, original.output, ['render', 'presentationMeta']],
+  ]) {
+    for (const method of methods) {
+      if (typeof source?.[method] !== 'function') continue
+      target[method] = (args, ...rest) => source[method](normalize(args), ...rest)
+    }
   }
   return repaired
 }
 
 /**
- * Shadow known tools in the agent scope without changing original definitions.
- * Reuse original execution, validation, sandbox, approval and output behavior.
+ * Shadow every visible object-parameter tool in the agent scope without
+ * changing original definitions. Reuse original execution, validation,
+ * sandbox, approval and output behavior.
  */
 export function apply(ctx) {
   ctx.on('agent/created', ({ agent }) => {
     const disposers = []
     let refreshing = false
+    // Enumerate the scope's visible catalog so envelope repair also reaches
+    // tools this plugin does not name (subagent family, fs tools, …).
+    const toolNames = () => {
+      const names = new Set(KNOWN_TOOLS)
+      try {
+        for (const schema of agent.ctx.tools.schemas?.(agent) ?? []) names.add(schema.name)
+      } catch {
+        // An older registry without schemas() still gets the known repairs.
+      }
+      names.delete(RESERVED_TOOL)
+      return names
+    }
     const install = () => {
-      for (const toolName of REPAIRABLE) {
+      for (const toolName of toolNames()) {
         const original = agent.ctx.tools.get(toolName, agent)
         if (original === undefined) continue
         const repaired = repairDefinition(toolName, original)
@@ -110,4 +151,4 @@ export function apply(ctx) {
   })
 }
 
-export { withDefaultDescription, withWebSearchQueries } from './repair.js'
+export { withDefaultDescription, withWebSearchQueries, unwrapArgEnvelope } from './repair.js'
