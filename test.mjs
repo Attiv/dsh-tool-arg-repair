@@ -541,6 +541,13 @@ for (const name of ['bash', 'pwsh']) {
       execute: async args => { calls.push(args); return args.command },
     })
     const repaired = installTools([tool]).get(name)
+    // output is copied before render is wrapped: a shared reference would
+    // overwrite the original render with a self-calling wrapper and overflow
+    // the stack on every rendered result.
+    assert.notEqual(repaired.output, tool.output)
+    assert.notEqual(repaired.output.render, tool.output.render)
+    assert.deepEqual(repaired.output.render({ command: 'git status', description: 'Show status' }, 'out'), [])
+    assert.deepEqual(tool.output.render({ command: 'git status', description: 'Show status' }, 'out'), [])
     assert.equal(await repaired.execute({ arguments: { command: 'git fetch upstream', description: 'Fetch upstream remote' } }, {}), 'git fetch upstream')
     assert.equal(await repaired.execute({ arguments: { arguments: { command: 'git status', description: 'Show status' } } }, {}), 'git status')
     assert.equal(await repaired.execute({ expected: { command: 'git log', description: 'Show log' } }, {}), 'git log')

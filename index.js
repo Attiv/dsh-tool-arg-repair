@@ -78,6 +78,12 @@ function repairDefinition(toolName, original) {
   const repaired = {
     ...original,
     parameters,
+    output: { ...original.output },
+    // Copy output so wrapping render/presentationMeta below never mutates the
+    // original tool's output object: a shared reference would wrap the
+    // original's own render and recurse until the stack overflows on every
+    // rendered result.
+    output: { ...original.output },
     async execute(args, exec) {
       return original.execute(normalize(args), exec)
     },
